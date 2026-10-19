@@ -1,8 +1,7 @@
 """
 StudySync -- Find a Study Spot (Ticket 3, Tinker 3B).
 
-TICKET: none of the ranking logic is implemented yet -- every function
-below is a stub.
+TICKET: implemented loading, scoring, ranking, and formatting functions.
 """
 
 import csv
@@ -15,9 +14,15 @@ def load_study_spots(csv_path: str) -> list:
     Load study spots from a CSV into a list of dicts, converting
     "distance_miles" to float and "seats_available" to int.
     """
-    # TODO: use csv.DictReader to read csv_path into a list of dicts.
-    # TODO: convert row["distance_miles"] to float and row["seats_available"] to int for each row.
-    raise NotImplementedError
+    spots = []
+    with open(csv_path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            # Convert numeric fields
+            row["distance_miles"] = float(row["distance_miles"]) if row.get("distance_miles") not in (None, "") else 0.0
+            row["seats_available"] = int(row["seats_available"]) if row.get("seats_available") not in (None, "") else 0
+            spots.append(row)
+    return spots
 
 
 def score_study_spot(profile: dict, spot: dict) -> tuple:
@@ -29,11 +34,74 @@ def score_study_spot(profile: dict, spot: dict) -> tuple:
     Return (score, reasons) where reasons is a list of short strings
     explaining what contributed to the score, e.g. ["quiet enough", "close enough"].
     """
-    # TODO: implement additive/weighted scoring using at least noise_level
-    # (compare using NOISE_ORDER), distance_miles vs max_distance, and
-    # seats_available vs min_seats. Append a short string to `reasons` for
-    # each factor that contributed, whether it helped or hurt the score.
-    raise NotImplementedError
+    reasons = []
+
+    # Weights (tuneable)
+    noise_weight = 5.0
+    distance_weight = 3.0
+    seats_weight = 2.0
+
+    score = 0.0
+
+    # Noise: lower is better. Use NOISE_ORDER to compare.
+    spot_noise = spot.get("noise_level")
+    profile_max_noise = profile.get("max_noise")
+    if spot_noise is None or profile_max_noise is None:
+        reasons.append("noise info missing")
+    else:
+        spot_order = NOISE_ORDER.get(spot_noise, 999)
+        max_order = NOISE_ORDER.get(profile_max_noise, 999)
+        if spot_order <= max_order:
+            score += noise_weight
+            reasons.append(f"noise OK ({spot_noise})")
+        else:
+            score -= noise_weight
+            reasons.append(f"too noisy ({spot_noise})")
+
+    # Distance: closer is better. If within max_distance, award points proportional
+    # to how much closer it is. If beyond, apply a penalty.
+    spot_distance = spot.get("distance_miles", 0.0)
+    max_distance = profile.get("max_distance")
+    if max_distance is None:
+        reasons.append("distance preference missing")
+    else:
+        try:
+            d = float(spot_distance)
+            if d <= max_distance:
+                # The closer, the more points (0..distance_weight)
+                if max_distance == 0:
+                    # avoid division by zero, treat exact match as full points
+                    dist_score = distance_weight
+                else:
+                    dist_score = distance_weight * (1 - (d / max_distance))
+                score += dist_score
+                reasons.append(f"close enough ({d} mi)")
+            else:
+                score -= distance_weight
+                reasons.append(f"too far ({d} mi)")
+        except (TypeError, ValueError):
+            reasons.append("distance data invalid")
+
+    # Seats: more seats is better. If at least min_seats, award up to seats_weight
+    # proportionally (cap at seats_weight). If not enough, apply a penalty.
+    spot_seats = spot.get("seats_available", 0)
+    min_seats = profile.get("min_seats")
+    if min_seats is None:
+        reasons.append("seat preference missing")
+    else:
+        try:
+            s = int(spot_seats)
+            if s >= min_seats and min_seats > 0:
+                seat_score = seats_weight * min(1.0, s / min_seats)
+                score += seat_score
+                reasons.append(f"enough seats ({s})")
+            else:
+                score -= seats_weight
+                reasons.append(f"not enough seats ({s})")
+        except (TypeError, ValueError):
+            reasons.append("seat data invalid")
+
+    return score, reasons
 
 
 def rank_study_spots(profile: dict, spots: list, k: int = 3) -> list:
@@ -41,16 +109,21 @@ def rank_study_spots(profile: dict, spots: list, k: int = 3) -> list:
     Score every study spot, then return the top k as (spot, score, reasons)
     tuples, sorted by score descending.
     """
-    # TODO: score every spot with score_study_spot(), then use
-    # sorted(..., key=..., reverse=True)[:k] to keep only the top k.
-    raise NotImplementedError
+    scored = []
+    for spot in spots:
+        s, reasons = score_study_spot(profile, spot)
+        scored.append((spot, s, reasons))
+
+    ranked = sorted(scored, key=lambda t: t[1], reverse=True)[:k]
+    return ranked
 
 
 def format_results(ranked: list) -> None:
     """Print each ranked study spot with its score and reasons, one line each."""
-    # TODO: for each (spot, score, reasons) tuple, print a readable line, e.g.:
-    # "1. Innovation Commons -- Score: 5.0 -- Because: quiet enough, close enough"
-    raise NotImplementedError
+    for i, (spot, score, reasons) in enumerate(ranked, start=1):
+        name = spot.get("name", "<unknown>")
+        reason_text = ", ".join(reasons) if reasons else "no reasons"
+        print(f"{i}. {name} -- Score: {score:.1f} -- Because: {reason_text}")
 
 
 def render_study_spot_tab():
